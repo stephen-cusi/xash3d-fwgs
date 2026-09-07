@@ -39,5 +39,8 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git merge upstream/master --no-edit -m "chore: sync with upstream FWGS/xash3d-fwgs"
-        git push origin master
+        # Use -X theirs to automatically resolve conflicts by preferring upstream version
+        git merge upstream/master --no-edit -X theirs -m "chore: sync with upstream FWGS/xash3d-fwgs"
+        # Submodule conflicts need special handling
+        git submodule update --init --recursive --remote --merge || git submodule update --init --recursive --checkout
+        git push origin master --force-with-lease
