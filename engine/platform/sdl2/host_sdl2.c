@@ -42,7 +42,7 @@ static void SDLash_KeyEvent( SDL_KeyboardEvent key )
 	}
 #endif
 
-	if( SDL_IsTextInputActive( ) && down )
+	if( host.textmode && down )
 	{
 		// this is how engine understands ctrl+c, ctrl+v and other hotkeys
 		if( cls.key_dest != key_game && FBitSet( SDL_GetModState(), KMOD_CTRL ))
@@ -292,7 +292,7 @@ static void SDLash_EventHandler( SDL_Event *event )
 		break;
 
 	case SDL_QUIT:
-		Sys_Quit( "caught SDL_QUIT" );
+		CL_RequestQuit( "caught SDL_QUIT" );
 		break;
 	case SDL_MOUSEWHEEL:
 		IN_MWheelEvent( event->wheel.y );
