@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  workflows: write  # upstream syncs may touch .github/workflows/, the bot needs this to push
 
 jobs:
   sync:
