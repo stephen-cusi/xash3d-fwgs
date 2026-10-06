@@ -11,6 +11,10 @@
 #   is intentionally absent, and wscript's Subproject class skips missing
 #   directories, so builds keep working.
 # - Submodules newly added by upstream are taken as-is.
+# - The fork's own workflow definitions (.github/workflows/) are never
+#   touched by the sync: GitHub rejects pushes made with the Actions token
+#   that modify workflow files, and the fork's CI matrix (including the
+#   windows-11-arm WOA job) is maintained here, not upstream.
 set -euo pipefail
 
 UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/FWGS/xash3d-fwgs.git}"
@@ -52,6 +56,11 @@ else
 		git rm -r --cached --quiet -- "$path"
 	done < <(git diff --name-only --diff-filter=U)
 fi
+
+# Keep the fork's own CI definitions out of the sync commit: GitHub
+# rejects pushes from the Actions token that modify .github/workflows/,
+# and the fork's workflow files carry fork-only jobs (windows-11-arm).
+git restore --source HEAD --staged --worktree -- .github/workflows
 
 # Restore the submodule pins the fork tracks. -X theirs would have moved them
 # to upstream's commits, which may be unreachable through the fork URLs.
