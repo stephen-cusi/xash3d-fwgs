@@ -96,7 +96,11 @@ static const feature_message_t bugcomp_features[] =
 { BUGCOMP_PENTITYOFENTINDEX_FLAG, "pfnPEntityOfEntIndex bugfix revert", "peoei" },
 { BUGCOMP_MESSAGE_REWRITE_FACILITY_FLAG, "GoldSrc Message Rewrite Facility", "gsmrf" },
 { BUGCOMP_SPATIALIZE_SOUND_WITH_ATTN_NONE, "spatialize sounds with zero attenuation", "sp_attn_none" },
-{ BUGCOMP_GET_GAME_DIR_FULL_PATH, "Return full path in GET_GAME_DIR()", "get_game_dir_full" }
+{ BUGCOMP_GET_GAME_DIR_FULL_PATH, "Return full path in GET_GAME_DIR()", "get_game_dir_full" },
+{ BUGCOMP_SPAWNFLAG_NOT_DEATHMATCH, "Inhibit entities with \"Not in Deathmatch\" spawnflag", "sf_notdm" },
+{ BUGCOMP_ALWAYS_ENABLE_TEXT_INPUT, "Always enable text input during gameplay", "always_textinput" },
+{ BUGCOMP_PRESERVE_TEXTURE_NAME_CASE, "Preserve BSP texture name case", "texname_case" },
+{ BUGCOMP_BIND_NOSPLIT, "Don't split key bindings by semicolon", "bind_nosplit" },
 };
 
 static const feature_message_t engine_features[] =
@@ -147,8 +151,9 @@ static void Host_PrintUsage( const char *exename )
 	O("-minidumps         ", "enable writing minidumps when game is crashed")
 #endif
 	O("-rodir <path>      ", "set read-only base directory")
-	O("-bugcomp [opts]    ", "enable precise bug compatibility")
+	O("-bugcomp <opts>    ", "enable precise bug compatibility")
 	O("                   ", "will break games that don't require it")
+	O("                   ", "run with no argument to list the known flags")
 	O("                   ", "refer to engine documentation for more info")
 	O("-language <lang>   ", "mount localization game directory")
 	O("-disablehelp       ", "disable this message")
@@ -507,8 +512,9 @@ static double Host_CalcFPS( void )
 	}
 	else if( Host_IsSinglePlayerGame( ))
 	{
-		if( !gl_vsync.value )
-			fps = host_maxfps.value;
+		// vsync is expected to limit the framerate, but some drivers
+		// ignore it, so never let the game run completely unlimited
+		fps = gl_vsync.value ? MAX_FPS_HARD : host_maxfps.value;
 	}
 	else if( !SV_Active() && CL_Protocol() == PROTO_GOLDSRC && cls.state != ca_disconnected && cls.state < ca_validate )
 	{
@@ -516,12 +522,16 @@ static double Host_CalcFPS( void )
 	}
 	else
 	{
-		if( !gl_vsync.value )
-		{
-			double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
+		const double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
 
+		if( gl_vsync.value )
+			fps = max_fps;
+		else
+		{
 			fps = host_maxfps.value;
-			if( fps == 0.0 ) fps = max_fps;
+			if( fps == 0.0 )
+				fps = max_fps;
+
 			fps = bound( MIN_FPS, fps, max_fps );
 		}
 	}
@@ -633,7 +643,8 @@ static qboolean Host_FilterTime( double time )
 
 	// NOTE: allow only in singleplayer while demos are not active
 	if( host_framerate.value > 0.0f && Host_IsSinglePlayerGame() && !CL_IsPlaybackDemo() && !CL_IsRecordDemo( ))
-		host.frametime = bound( MIN_FRAMETIME, host_framerate.value * scale, MAX_FRAMETIME );
+		// dont bound host framerate here, as it makes sped-up time progression significantly slower than Goldsrc. This is used in some mods like CoF to skip cinematics faster (for more context, see https://github.com/FWGS/xash3d-fwgs/issues/2706)
+		host.frametime = host_framerate.value * scale;
 	else
 		host.frametime = bound( MIN_FRAMETIME, host.frametime, MAX_FRAMETIME );
 
@@ -754,6 +765,14 @@ static void Sys_Error_f( void )
 	Sys_Error( "%s\n", error );
 }
 
+static void Sys_Warn_f( void )
+{
+	const char *warning = Cmd_Argv( 1 );
+
+	if( !*warning ) warning = "Invoked sys warning";
+	Sys_Warn( "%s", warning );
+}
+
 /*
 =================
 Host_Crash_f
@@ -826,15 +845,11 @@ static uint32_t Host_CheckBugcomp( void )
 	if( !Sys_CheckParm( "-bugcomp" ))
 		return 0;
 
-	if( Sys_GetParmFromCmdLine( "-bugcomp", args ) && isalpha((byte)args[0] ))
-	{
-		Q_splitstr( args, '+', &flags, Host_CheckBugcomp_splitstr_handler );
-	}
-	else
-	{
-		// no argument specified -bugcomp just enables everything
-		flags = -1;
-	}
+	// without an argument -bugcomp only prints the list of known flags, see Host_InitCommon
+	if( !Sys_GetParmFromCmdLine( "-bugcomp", args ) || !isalpha((byte)args[0] ))
+		return 0;
+
+	Q_splitstr( args, '+', &flags, Host_CheckBugcomp_splitstr_handler );
 
 	Host_PrintFeatures( flags, "BUGCOMP", bugcomp_features, ARRAYSIZE( bugcomp_features ));
 
@@ -1012,8 +1027,11 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 		if( Sys_CheckParm( "-help" ) || Sys_CheckParm( "-h" ) || Sys_CheckParm( "--help" ))
 			Host_PrintUsage( exename );
 
-		if( Sys_GetParmFromCmdLine( "-bugcomp", arg ) && !Q_stricmp( arg, "help" ))
-			Host_PrintBugcompUsage( exename );
+		if( Sys_CheckParm( "-bugcomp" ))
+		{
+			if( !Sys_GetParmFromCmdLine( "-bugcomp", arg ) || !isalpha((byte)arg[0] ) || !Q_stricmp( arg, "help" ))
+				Host_PrintBugcompUsage( exename );
+		}
 	}
 
 	host.change_game = bChangeGame || Sys_CheckParm( "-changegame" );
@@ -1155,7 +1173,7 @@ static void Host_FreeCommon( void )
 
 static void Sys_Quit_f( void )
 {
-	Sys_Quit( "command" );
+	Sys_Quit( Cmd_Argc() > 1 ? Cmd_Argv( 1 ) : "command" );
 }
 
 /*
@@ -1167,6 +1185,10 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 {
 	static double oldtime;
 	string exename;
+
+#if XASH_ANDROID
+	pChangeGame = NULL;
+#endif
 
 	if( setjmp( return_from_main_buf ))
 		return error_on_exit;
@@ -1180,6 +1202,7 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 	{
 		Cmd_AddRestrictedCommand ( "sys_error", Sys_Error_f, "just throw a fatal error to test shutdown procedures");
 		Cmd_AddRestrictedCommand ( "host_error", Host_Error_f, "just throw a host error to test shutdown procedures");
+		Cmd_AddRestrictedCommand ( "sys_warn", Sys_Warn_f, "just show a warning to test message boxes");
 		Cmd_AddRestrictedCommand ( "crash", Host_Crash_f, "a way to force a bus error for development reasons");
 	}
 
@@ -1293,6 +1316,7 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 
 #ifndef XASH_DEDICATED
 	IN_GyroCheckAvailability();
+	Joy_AutoPreset();
 #endif
 
 	string demoname;
@@ -1323,6 +1347,11 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 	// check after all configs were executed
 	HPAK_CheckIntegrity( hpk_custom_file.string );
 
+#if XASH_PS4
+	// initialization is done, startup splash can be hidden with the next frames
+	PS4_AllowHideSplash( );
+#endif
+
 	// main window message loop
 	while( host.status != HOST_CRASHED )
 	{
@@ -1347,12 +1376,16 @@ Host_Shutdown
 */
 void Host_ShutdownWithReason( const char *reason )
 {
+	string reasoncopy = "";
 	qboolean error = host.status == HOST_ERR_FATAL;
 
 	if( host.shutdown_issued )
 		return;
 
 	host.shutdown_issued = true;
+
+	if( reason != NULL )
+		Q_strncpy( reasoncopy, reason, sizeof( reasoncopy ));
 
 	if( reason != NULL )
 		Con_Printf( S_NOTE "Issuing host shutdown due to reason \"%s\"\n", reason );
@@ -1387,5 +1420,5 @@ void Host_ShutdownWithReason( const char *reason )
 
 	// restore filter
 	Sys_RestoreCrashHandler();
-	Sys_CloseLog( reason );
+	Sys_CloseLog( reason != NULL ? reasoncopy : NULL );
 }

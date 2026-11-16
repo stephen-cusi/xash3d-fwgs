@@ -24,7 +24,8 @@ def configure(conf):
 		if conf.env.cxxshlib_PATTERN.startswith('lib'):
 			conf.env.cxxshlib_PATTERN = conf.env.cxxshlib_PATTERN[3:]
 
-	if conf.check_cc(fragment=MEMFD_CREATE_TEST, msg='Checking for memfd_create', mandatory=False):
+	# PS4 libc has memfd_create, but the kernel doesn't
+	if conf.env.DEST_OS != 'ps4' and conf.check_cc(fragment=MEMFD_CREATE_TEST, msg='Checking for memfd_create', mandatory=False):
 		conf.define('HAVE_MEMFD_CREATE', 1)
 
 	if conf.check_cc(fragment=DIRENT_D_TYPE_TEST, msg='Checking for d_type field in struct dirent', mandatory=False):
@@ -37,10 +38,10 @@ def build(bld):
 
 	# on PSVita do not link any libraries that are already in the main executable, but add the includes target
 	if bld.env.DEST_OS != 'psvita':
-		libs += [ 'public', 'ANDROID', 'library_suffix', 'build_vcs' ]
+		libs += [ 'public', 'zlib', 'ANDROID', 'library_suffix', 'build_vcs' ]
 
 	bld.shlib(target = 'filesystem_stdio',
-		features = 'seq',
+		features = 'seq format',
 		source = bld.path.ant_glob(['*.c', '*.cpp']),
 		use = libs,
 		install_path = bld.env.LIBDIR)
@@ -56,7 +57,7 @@ def build(bld):
 		}
 
 		for i in tests:
-			bld.program(features = 'test seq',
+			bld.program(features = 'test seq format',
 				source = tests[i],
 				target = 'test_%s' % i,
 				use = libs + ['DL'],

@@ -42,7 +42,7 @@ static void SDLash_KeyEvent( SDL_KeyboardEvent key )
 	}
 #endif
 
-	if( SDL_IsTextInputActive( ) && down )
+	if( host.textmode && down )
 	{
 		// this is how engine understands ctrl+c, ctrl+v and other hotkeys
 		if( cls.key_dest != key_game && FBitSet( SDL_GetModState(), KMOD_CTRL ))
@@ -239,6 +239,10 @@ static void SDLash_InputEvent( SDL_TextInputEvent input )
 
 static void SDLash_ActiveEvent( int gain )
 {
+#if XASH_SAILFISH
+	Sailfish_SetActive( gain );
+#endif
+
 	if( gain )
 	{
 		host.status = HOST_FRAME;
@@ -292,7 +296,7 @@ static void SDLash_EventHandler( SDL_Event *event )
 		break;
 
 	case SDL_QUIT:
-		Sys_Quit( "caught SDL_QUIT" );
+		CL_RequestQuit( "caught SDL_QUIT" );
 		break;
 	case SDL_MOUSEWHEEL:
 		IN_MWheelEvent( event->wheel.y );
@@ -347,6 +351,10 @@ static void SDLash_EventHandler( SDL_Event *event )
 			dx /= (float)refState.width;
 			dy /= (float)refState.height;
 		}
+
+#if XASH_SAILFISH
+		Sailfish_MapTouch( event->tfinger.touchId, &x, &y, &dx, &dy );
+#endif
 
 		IN_TouchEvent( type, event->tfinger.fingerId, x, y, dx, dy );
 		break;
@@ -435,6 +443,10 @@ void Platform_RunEvents( void )
 
 #if XASH_PSVITA
 	PSVita_InputUpdate();
+#endif
+
+#if XASH_SAILFISH
+	Sailfish_RunEvents();
 #endif
 }
 

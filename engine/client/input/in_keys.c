@@ -48,6 +48,13 @@ static struct
 	int x, y, w, h;
 } key_textinput_rect;
 
+// real platform text input state, might differ from host.textmode with BUGCOMP_ALWAYS_ENABLE_TEXT_INPUT
+static qboolean key_textinput_enabled;
+
+// text of the menu field, system keyboard opens with it on the next text input enable
+static char key_textinput_buffer[1024];
+static qboolean key_textinput_buffer_set;
+
 static const keyname_t keynames[] =
 {
 { "TAB",            K_TAB,                 ""                },
@@ -141,8 +148,8 @@ static const keyname_t keynames[] =
 { "PADDLE3",        K_PADDLE3_BUTTON,      ""                },
 { "PADDLE4",        K_PADDLE4_BUTTON,      ""                },
 { "TOUCHPAD",       K_TOUCHPAD,            ""                },
-{ "AUX26",          K_AUX26,               ""                }, // generic
-{ "AUX27",          K_AUX27,               ""                },
+{ "MISC2_BUTTON",   K_MISC2_BUTTON,        ""                },
+{ "AUX27",          K_AUX27,               ""                }, // generic
 { "AUX28",          K_AUX28,               ""                },
 { "AUX29",          K_AUX29,               ""                },
 { "AUX30",          K_AUX30,               ""                },
@@ -288,6 +295,23 @@ const char *Key_GetBinding( int keynum )
 	if( keynum == -1 )
 		return NULL;
 	return keys[keynum].binding;
+}
+
+/*
+===================
+Key_GetDefaultBinding
+
+===================
+*/
+const char *Key_GetDefaultBinding( int keynum )
+{
+	for( int i = 0; i < ARRAYSIZE( keynames ); i++ )
+	{
+		if( keynames[i].keynum == keynum )
+			return keynames[i].binding;
+	}
+
+	return "";
 }
 
 /*
@@ -584,6 +608,26 @@ static void Key_AddKeyCommands( int key, const char *kb, qboolean down )
 
 	char button[1024];
 	char *buttonPtr = button;
+
+	// GoldSrc doesn't split bindings, the key number goes after the whole string
+	// and "+cmd;-cmd" relies on that, as only the "-cmd" half carries the key number
+	if( FBitSet( host.bugcomp, BUGCOMP_BIND_NOSPLIT ))
+	{
+		char cmd[1024];
+
+		if( kb[0] == '+' )
+		{
+			if( down ) Q_snprintf( cmd, sizeof( cmd ), "%s %i\n", kb, key );
+			else Q_snprintf( cmd, sizeof( cmd ), "-%s %i\n", kb + 1, key );
+			Cbuf_AddText( cmd );
+		}
+		else if( down )
+		{
+			Q_snprintf( cmd, sizeof( cmd ), "%s\n", kb );
+			Cbuf_AddText( cmd );
+		}
+		return;
+	}
 
 	for( int i = 0; ; i++ )
 	{
@@ -885,11 +929,36 @@ void Key_SetTextInputRect( int x, int y, int w, int h )
 	key_textinput_rect.h = h;
 
 	// text is already edited somewhere else now, let the platform know immediately
-	if( host.textmode && !osk_enable.value )
+	if( key_textinput_enabled && !osk_enable.value )
 	{
 		Key_GetTextInputRect( &x, &y, &w, &h );
 		Platform_EnableTextInput( true, x, y, w, h );
 	}
+}
+
+/*
+================
+Key_SetTextInputBuffer
+
+================
+*/
+void Key_SetTextInputBuffer( const char *text )
+{
+	key_textinput_buffer_set = text != NULL;
+	Q_strncpy( key_textinput_buffer, text ? text : "", sizeof( key_textinput_buffer ));
+}
+
+/*
+================
+Key_GetTextInputBuffer
+
+text for the system keyboard while Platform_EnableTextInput( true ) is called,
+NULL if the system keyboard isn't requested
+================
+*/
+const char *Key_GetTextInputBuffer( void )
+{
+	return key_textinput_buffer_set ? key_textinput_buffer : NULL;
 }
 
 /*
@@ -903,24 +972,42 @@ void Key_EnableTextInput( qboolean enable, qboolean force )
 	if( osk_enable.value )
 	{
 		OSK_EnableTextInput( enable, force );
+		Key_SetTextInputBuffer( NULL );
 		return;
 	}
 
-	if( enable && ( !host.textmode || force ))
+	// the menu asks to open the system keyboard with its text, even if text input is enabled already
+	if( enable && key_textinput_buffer_set )
+		force = true;
+
+	// some mods (like Natural Selection) pull text events out of the platform event queue on their own and expect them to always arrive during the gameplay, like they do in GoldSrc
+	qboolean enable_platform = enable || ( cls.key_dest == key_game && FBitSet( host.bugcomp, BUGCOMP_ALWAYS_ENABLE_TEXT_INPUT ));
+
+	if( !enable && ( host.textmode || force ))
+	{
+		// don't reuse this rect for whoever enables the text input next
+		memset( &key_textinput_rect, 0, sizeof( key_textinput_rect ));
+	}
+
+	// host.textmode is compared against here to pick up the new rect when the engine
+	// leaves the text mode but the platform text input is kept running
+	if( enable_platform && ( !key_textinput_enabled || host.textmode != enable || force ))
 	{
 		int x, y, w, h;
 
 		Key_GetTextInputRect( &x, &y, &w, &h );
 		Platform_EnableTextInput( true, x, y, w, h );
 	}
-	else if( !enable && ( host.textmode || force ))
+	else if( !enable_platform && ( key_textinput_enabled || force ))
 	{
-		// don't reuse this rect for whoever enables the text input next
-		memset( &key_textinput_rect, 0, sizeof( key_textinput_rect ));
 		Platform_EnableTextInput( false, 0, 0, 0, 0 );
 	}
 
+	key_textinput_enabled = enable_platform;
 	host.textmode = enable;
+
+	// only for this request
+	Key_SetTextInputBuffer( NULL );
 }
 
 /*

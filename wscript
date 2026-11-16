@@ -55,9 +55,11 @@ def use_xash_clang_format(self):
 
 
 class Subproject:
-	def __init__(self, name, fnFilter = None):
+	# manual_checkout: subproject is a submodule with update = none, its wscript is missing until it's checked out
+	def __init__(self, name, fnFilter = None, manual_checkout = False):
 		self.name = name
 		self.fnFilter = fnFilter
+		self.manual_checkout = manual_checkout
 
 	def is_exists(self, ctx):
 		return ctx.path.find_node(self.name + '/wscript')
@@ -104,6 +106,7 @@ class RefDll:
 SUBDIRS = [
 	# always configured and built
 	Subproject('public'),
+	Subproject('3rdparty/miniz', lambda x: not x.env.HAVE_SYSTEM_ZLIB),
 	Subproject('filesystem'),
 	Subproject('stub/server'),
 	Subproject('3rdparty/libbacktrace'),
@@ -113,20 +116,23 @@ SUBDIRS = [
 
 	# disable only by engine feature, makes no sense to even parse subprojects in dedicated mode
 	Subproject('3rdparty/extras',       lambda x: x.env.CLIENT and x.env.DEST_OS != 'android'),
-	Subproject('3rdparty/nanogl',       lambda x: x.env.CLIENT and x.env.NANOGL),
-	Subproject('3rdparty/gl-wes-v2',    lambda x: x.env.CLIENT and x.env.GLWES),
+	Subproject('3rdparty/nanogl',       lambda x: x.env.CLIENT and x.env.NANOGL, manual_checkout = True),
+	Subproject('3rdparty/gl-wes-v2',    lambda x: x.env.CLIENT and x.env.GLWES, manual_checkout = True),
 	Subproject('3rdparty/gl4es',        lambda x: x.env.CLIENT and x.env.GL4ES),
 	Subproject('ref/common',            lambda x: x.env.CLIENT),
 	Subproject('ref/gl',                lambda x: x.env.CLIENT and (x.env.GL or x.env.NANOGL or x.env.GLWES or x.env.GL4ES or x.env.GLES3COMPAT)),
 	Subproject('ref/soft',              lambda x: x.env.CLIENT and x.env.SOFT),
 	Subproject('ref/null',              lambda x: x.env.CLIENT and x.env.NULL),
 	Subproject('3rdparty/bzip2',        lambda x: x.env.CLIENT and not x.env.HAVE_SYSTEM_BZ2),
+	Subproject('3rdparty/mpg123',       lambda x: x.env.CLIENT and not x.env.HAVE_SYSTEM_MPG123),
 	Subproject('3rdparty/mbedtls'),
+	Subproject('3rdparty/opengnm',      lambda x: x.env.CLIENT and x.env.DEST_OS == 'ps4'),
+	Subproject('3rdparty/ps4compat',    lambda x: x.env.DEST_OS == 'ps4'),
 	Subproject('3rdparty/opus',         lambda x: x.env.CLIENT and not x.env.HAVE_SYSTEM_OPUS),
 	Subproject('3rdparty/libogg',       lambda x: x.env.CLIENT and not x.env.HAVE_SYSTEM_OGG),
 	Subproject('3rdparty/vorbis',       lambda x: x.env.CLIENT and (not x.env.HAVE_SYSTEM_VORBIS or not x.env.HAVE_SYSTEM_VORBISFILE)),
 	Subproject('3rdparty/opusfile',     lambda x: x.env.CLIENT and not x.env.HAVE_SYSTEM_OPUSFILE),
-	Subproject('3rdparty/maintui',      lambda x: x.env.CLIENT and x.env.TUI),
+	Subproject('3rdparty/maintui',      lambda x: x.env.CLIENT and x.env.TUI, manual_checkout = True),
 	Subproject('3rdparty/mainui',       lambda x: x.env.CLIENT and x.env.DEST_OS != 'android'),
 
 	# engine is obligated to provide VGUI interface in 32-bit builds on Windows/Linux/Mac as shared library
@@ -135,16 +141,23 @@ SUBDIRS = [
 
 	Subproject('3rdparty/MultiEmulator',lambda x: x.env.CLIENT),
 	Subproject('stub/client',           lambda x: x.env.CLIENT),
-	Subproject('game_launch',           lambda x: x.env.LAUNCHER),
+	Subproject('game_launch',           lambda x: x.env.LAUNCHER and not x.env.SAILFISH),
+	Subproject('sailfish',              lambda x: x.env.CLIENT and x.env.SAILFISH),
 	Subproject('engine'), # keep latest for static linking
 
 	# enabled optionally
 	Subproject('utils/mdldec',            lambda x: x.env.ENABLE_UTILS),
-	Subproject('utils/xar',               lambda x: x.env.ENABLE_UTILS and x.env.ENABLE_XAR),
+	Subproject('utils/xar',               lambda x: x.env.ENABLE_UTILS),
 	Subproject('utils/xash-clang-format', lambda x: x.env.ENABLE_UTILS),
+	Subproject('utils/xrcon-tui',         lambda x: x.env.ENABLE_UTILS),
 
 	# enabled on PSVita only
 	Subproject('ref/gl/vgl_shim',   lambda x: x.env.DEST_OS == 'psvita'),
+
+	# enabled on PS4 only
+	Subproject('3rdparty/glslang',      lambda x: x.env.CLIENT and x.env.GL and x.env.DEST_OS == 'ps4'),
+	Subproject('3rdparty/opengnm-psbc', lambda x: x.env.CLIENT and x.env.GL and x.env.DEST_OS == 'ps4'),
+	Subproject('ref/gl/gnm_shim',            lambda x: x.env.CLIENT and x.env.GL and x.env.DEST_OS == 'ps4'),
 ]
 
 REFDLLS = [
@@ -158,7 +171,7 @@ REFDLLS = [
 ]
 
 def options(opt):
-	opt.load('reconfigure compiler_optimizations xshlib xcompile compiler_cxx compiler_c sdl2 clang_compilation_database strip_on_install waf_unit_test msvs subproject ninja')
+	opt.load('reconfigure compiler_optimizations xshlib xcompile compiler_cxx compiler_c sdl2 clang_compilation_database strip_on_install waf_unit_test msvs subproject ninja host_tool_compiler')
 
 	grp = opt.add_option_group('Common options')
 
@@ -218,9 +231,6 @@ def options(opt):
 	grp.add_option('--enable-utils', action = 'store_true', dest = 'ENABLE_UTILS', default = False,
 		help = 'enable building various development utilities [default: %(default)s]')
 
-	grp.add_option('--enable-xar', action = 'store_true', dest = 'ENABLE_XAR', default = False,
-		help = 'enable building Xash ARchiver (experimental) [default: %(default)s]')
-
 	grp.add_option('--enable-fuzzer', action = 'store_true', dest = 'ENABLE_FUZZER', default = False,
 		help = 'enable building libFuzzer runner [default: %(default)s]' )
 
@@ -229,6 +239,72 @@ def options(opt):
 			continue
 
 		opt.add_subproject(i.name)
+
+def check_system_pkg(conf, name):
+	return conf.check_cfg(package=name, uselib_store=name, args='--cflags --libs', mandatory=False)
+
+def check_system_opus(conf):
+	# search for opus 1.4 only, it has fixes for custom modes
+	# 1.5 breaks custom modes: https://github.com/xiph/opus/issues/374
+	have_opus = conf.check_cfg(package='opus', uselib_store='opus', args=['opus = 1.4', '--cflags', '--libs'], mandatory=False)
+
+	# 1.6.1 fixes them again
+	if not have_opus:
+		have_opus = conf.check_cfg(package='opus', uselib_store='opus', args=['opus >= 1.6.1', '--cflags', '--libs'], mandatory=False)
+
+	if not have_opus:
+		return False
+
+	# now try to link with export that only exists with CUSTOM_MODES defined
+	frag='''#include <opus_custom.h>
+int main(void) { return !opus_custom_encoder_init((OpusCustomEncoder *)1, (const OpusCustomMode *)1, 1); }'''
+
+	return conf.check_cc(msg='Checking if opus supports custom modes', defines='CUSTOM_MODES=1', use='opus werror', fragment=frag, mandatory=False)
+
+def check_system_opusfile(conf):
+	if not check_system_pkg(conf, 'opusfile'):
+		return False
+
+	frag='''#include <opusfile.h>
+int main(int argc, char **argv) { return opus_tagcompare(argv[0], argv[1]); }'''
+
+	return conf.check_cc(msg='Checking for libopusfile sanity', use='opusfile werror', fragment=frag, mandatory=False)
+
+def check_system_mpg123(conf):
+	# 1.32 introduced portable API with int64_t reader callbacks
+	return conf.check_cfg(package='libmpg123', uselib_store='mpg123', args=['libmpg123 >= 1.32', '--cflags', '--libs'], mandatory=False)
+
+def check_system_bzip2(conf):
+	frag='''#include <bzlib.h>
+int main(void) { return (int)BZ2_bzlibVersion(); }'''
+
+	return conf.check_cc(lib='bz2', fragment=frag, uselib_store='bzip2', mandatory=False)
+
+def check_system_zlib(conf):
+	# search for zlib-ng with native API first, then for anything providing zlib API
+	frag='''#include <zlib-ng.h>
+int main(void) { zng_stream s = { 0 }; return zng_inflateInit2(&s, -MAX_WBITS); }'''
+
+	if conf.check_cc(lib='z-ng', fragment=frag, msg='Checking for zlib-ng', uselib_store='zlib', mandatory=False):
+		conf.env.append_unique('DEFINES_zlib', 'XASH_ZLIB_NG=1')
+		return True
+
+	frag='''#include <zlib.h>
+int main(void) { z_stream s = { 0 }; return inflateInit2(&s, -MAX_WBITS); }'''
+
+	return conf.check_cc(lib='z', fragment=frag, msg='Checking for zlib', uselib_store='zlib', mandatory=False)
+
+
+def check_system_freetype(conf):
+	frag='''#include <ft2build.h>
+#include FT_FREETYPE_H
+int main(void) { FT_Library library; return FT_Init_FreeType( &library ); }'''
+
+	# search for freetype
+	if conf.check_cfg(package='freetype2', uselib_store='freetype', args='--cflags --libs', mandatory=False):
+		return False
+
+	return conf.check_cc(msg='Checking for freetype2 sanity', use='freetype werror', fragment=frag, mandatory=False)
 
 def configure(conf):
 	conf.load('fwgslib reconfigure compiler_optimizations')
@@ -267,6 +343,9 @@ def configure(conf):
 
 	if conf.options.PSVITA:
 		conf.load('psvita')
+
+	if conf.options.PS4:
+		conf.load('ps4')
 
 	# HACKHACK: override msvc DEST_CPU value by something that we understand
 	if conf.env.DEST_CPU == 'amd64':
@@ -307,6 +386,23 @@ def configure(conf):
 		enforce_pic = False
 	elif conf.env.MSVC_WINE:
 		conf.options.BUILD_BUNDLED_DEPS = True
+	elif conf.env.DEST_OS == 'ps4':
+		# no OpenGL driver: ref_gl draws through our OpenGL layer over GNM (ref/gl/gnm_shim)
+		conf.options.GL               = True
+		conf.options.GLES3COMPAT      = False
+		conf.options.SOFT             = False
+		conf.options.USE_STBTT        = True  # mainui: no freetype2 package for PS4
+		conf.options.BUILD_BUNDLED_DEPS = True # the toolchain has no packages, host ones must not leak in
+		# opengnm calls them, both the engine and ref_gl link it
+		conf.env.LIB_PS4GNM_SYS = ['SceGnmDriver', 'SceVideoOut']
+	elif conf.env.SAILFISH:
+		conf.options.NANOGL           = True
+		conf.options.GLWES            = False # deprecated
+		conf.options.GL4ES            = True
+		conf.options.GLES3COMPAT      = True
+		conf.options.GL               = False
+		# Harbour doesn't allow linking to system freetype
+		conf.options.USE_STBTT        = True
 
 	# psvita needs -fPIC set manually and static builds are incompatible with -fPIC
 	enforce_pic = conf.env.DEST_OS != 'psvita' and not conf.env.STATIC_LINKING
@@ -360,6 +456,16 @@ def configure(conf):
 		linkflags.append('-Wl,-undefined,error')
 	elif conf.env.SAILFISH:
 		conf.define('XASH_SAILFISH', 1)
+		# Harbour requires this name for the binary, desktop file, icons and /usr/share directory
+		conf.env.SAILFISH_PACKAGE = 'harbour-xash3d-fwgs'
+		# Harbour validator only recognizes DT_RPATH
+		linkflags.append('-Wl,--disable-new-dtags')
+
+	if conf.env.DEST_OS == 'ps4':
+		# fix broken struct sockaddr_storage in OpenOrbis headers
+		fix = conf.path.find_node('3rdparty/ps4compat/ps4_sockaddr.h').abspath()
+		cflags += ['-include', fix]
+		cxxflags += ['-include', fix]
 
 	conf.check_cc(cflags=cflags, linkflags=linkflags, msg='Checking for required C flags')
 	conf.check_cxx(cxxflags=cxxflags, linkflags=linkflags, msg='Checking for required C++ flags')
@@ -453,14 +559,13 @@ def configure(conf):
 
 	conf.env.TESTS         = conf.options.TESTS
 	conf.env.ENABLE_UTILS  = conf.options.ENABLE_UTILS
-	conf.env.ENABLE_XAR    = conf.options.ENABLE_XAR
 	conf.env.ENABLE_FUZZER = conf.options.ENABLE_FUZZER
 	conf.env.FREEVGUI_XASH_SUPPORT = True
 
 	if not conf.options.DEDICATED:
 		conf.env.SERVER = conf.options.ENABLE_DEDICATED
 		conf.env.CLIENT = True
-		conf.env.LAUNCHER = conf.env.DEST_OS not in ['android', 'nswitch', 'psvita', 'dos', 'emscripten'] and not conf.env.IOS and not conf.env.MAGX and not conf.env.STATIC_LINKING
+		conf.env.LAUNCHER = conf.env.DEST_OS not in ['android', 'nswitch', 'psvita', 'ps4', 'dos', 'emscripten'] and not conf.env.IOS and not conf.env.MAGX and not conf.env.STATIC_LINKING
 	else:
 		conf.env.SERVER = True
 		conf.env.CLIENT = False
@@ -470,7 +575,7 @@ def configure(conf):
 
 	conf.define_cond('SUPPORT_HL25_EXTENDED_STRUCTS', conf.options.SUPPORT_HL25_EXTENDED_STRUCTS)
 
-	if conf.options.ENABLE_RPATH and conf.env.DEST_OS not in ['nswitch', 'psvita']:
+	if conf.options.ENABLE_RPATH and conf.env.DEST_OS not in ['nswitch', 'psvita', 'ps4']:
 		if conf.env.DEST_OS == 'openbsd':
 			# OpenBSD requires -z origin to enable $ORIGIN expansion in RPATH
 			conf.env.RPATH_ST = '-Wl,-z,origin,-rpath,%s'
@@ -557,52 +662,61 @@ def configure(conf):
 	if conf.options.PACKAGING:
 		conf.env.PREFIX = conf.options.prefix
 		if conf.env.SAILFISH:
-			conf.env.SHAREDIR = '${PREFIX}/share/harbour-xash3d-fwgs/rodir'
+			# Harbour allows shipping libraries only in /usr/share/<name>/lib, including the game libraries in rodir
+			conf.env.LIBDIR = os.path.join(conf.env.PREFIX, 'share', conf.env.SAILFISH_PACKAGE, 'lib')
+			conf.env.SHAREDIR = conf.env.LIBDIR + '/rodir'
+			if conf.options.ENABLE_RPATH:
+				conf.env.DEFAULT_RPATH = conf.env.LIBDIR
 		else:
 			conf.env.SHAREDIR = '${PREFIX}/share/xash3d'
 			conf.env.LIBDIR += '/xash3d'
 	else:
 		conf.env.SHAREDIR = conf.env.LIBDIR = conf.env.BINDIR = conf.env.PREFIX
 
-	if not conf.options.BUILD_BUNDLED_DEPS:
-		# there was a check for system libbacktrace but we can't be sure if it supports fileline or not
-		# therefore, always build libbacktrace ourselves
+	# there was a check for system libbacktrace but we can't be sure if it supports fileline or not
+	# therefore, always build libbacktrace ourselves
+	prefer_bundled_ogg = conf.options.BUILD_BUNDLED_DEPS
+	prefer_bundled_vorbis = conf.options.BUILD_BUNDLED_DEPS
+	prefer_bundled_opus = conf.options.BUILD_BUNDLED_DEPS
+	prefer_bundled_opusfile = conf.options.BUILD_BUNDLED_DEPS
+	prefer_bundled_mpg123 = conf.options.BUILD_BUNDLED_DEPS
+	prefer_bundled_bzip2 = conf.options.BUILD_BUNDLED_DEPS
+	prefer_bundled_freetype = conf.options.BUILD_BUNDLED_DEPS
+	# Harbour doesn't allow linking to these system libraries
+	if conf.env.SAILFISH:
+		prefer_bundled_opus = True
+		prefer_bundled_opusfile = True
+		prefer_bundled_mpg123 = True
+		prefer_bundled_freetype = True
+	# zlib is a part of platform API on Android
+	prefer_bundled_zlib = conf.options.BUILD_BUNDLED_DEPS and conf.env.DEST_OS != 'android'
 
-		if conf.env.CLIENT:
-			for i in ('ogg','opusfile','vorbis','vorbisfile'):
-				if conf.check_cfg(package=i, uselib_store=i, args='--cflags --libs', mandatory=False):
-					conf.env['HAVE_SYSTEM_%s' % i.upper()] = True
+	if conf.env.CLIENT:
+		if not prefer_bundled_ogg:
+			conf.env.HAVE_SYSTEM_OGG = check_system_pkg(conf, 'ogg')
+		if not prefer_bundled_vorbis:
+			conf.env.HAVE_SYSTEM_VORBIS = check_system_pkg(conf, 'vorbis')
+			conf.env.HAVE_SYSTEM_VORBISFILE = check_system_pkg(conf, 'vorbisfile')
+		if not prefer_bundled_opus:
+			conf.env.HAVE_SYSTEM_OPUS = check_system_opus(conf)
+		if not prefer_bundled_opusfile:
+			conf.env.HAVE_SYSTEM_OPUSFILE = check_system_opusfile(conf)
+		if not prefer_bundled_mpg123:
+			conf.env.HAVE_SYSTEM_MPG123 = check_system_mpg123(conf)
+		if not prefer_bundled_bzip2:
+			conf.env.HAVE_SYSTEM_BZ2 = check_system_bzip2(conf)
+		if not prefer_bundled_freetype:
+			conf.env.HAVE_SYSTEM_FREETYPE = check_system_freetype(conf)
 
-				if conf.env.HAVE_SYSTEM_OPUSFILE:
-					frag='''#include <opusfile.h>
-int main(int argc, char **argv) { return opus_tagcompare(argv[0], argv[1]); }'''
-
-					conf.env.HAVE_SYSTEM_OPUSFILE = conf.check_cc(msg='Checking for libopusfile sanity', use='opusfile werror', fragment=frag, mandatory=False)
-
-			# search for opus 1.4 only, it has fixes for custom modes
-			# 1.5 breaks custom modes: https://github.com/xiph/opus/issues/374
-			have_opus = conf.check_cfg(package='opus', uselib_store='opus', args=['opus = 1.4', '--cflags', '--libs'], mandatory=False)
-
-			# 1.6.1 fixes them again
-			if not have_opus:
-				have_opus = conf.check_cfg(package='opus', uselib_store='opus', args=['opus >= 1.6.1', '--cflags', '--libs'], mandatory=False)
-
-			if have_opus:
-				# now try to link with export that only exists with CUSTOM_MODES defined
-				frag='''#include <opus_custom.h>
-int main(void) { return !opus_custom_encoder_init((OpusCustomEncoder *)1, (const OpusCustomMode *)1, 1); }'''
-
-				conf.env.HAVE_SYSTEM_OPUS = conf.check_cc(msg='Checking if opus supports custom modes', defines='CUSTOM_MODES=1', use='opus werror', fragment=frag, mandatory=False)
-
-			# search for bzip2
-			BZIP2_CHECK='''#include <bzlib.h>
-int main(void) { return (int)BZ2_bzlibVersion(); }'''
-
-			conf.env.HAVE_SYSTEM_BZ2 = conf.check_cc(lib='bz2', fragment=BZIP2_CHECK, uselib_store='bzip2', mandatory=False)
+	if not prefer_bundled_zlib:
+		conf.env.HAVE_SYSTEM_ZLIB = check_system_zlib(conf)
 
 	conf.define('XASH_LOW_MEMORY', conf.options.LOW_MEMORY)
 
 	for i in SUBDIRS:
+		if i.manual_checkout and not i.is_exists(conf) and i.fnFilter(conf):
+			conf.fatal('Can\'t find %s submodule. Run `git submodule update --init --checkout %s`.' % (i.name, i.name))
+
 		if not i.is_enabled(conf):
 			continue
 

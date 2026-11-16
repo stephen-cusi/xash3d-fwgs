@@ -131,25 +131,31 @@ void R_Set2DMode( qboolean enable )
 		if( glState.in2DMode )
 			return;
 
+		GL_BindScreenTarget();
+
 		matrix4x4 projection_matrix;
+
+		// the screen target is moved into place when it's presented
+		int x = GL_RenderTargetsActive() ? 0 : tr.offset_x;
+		int y = GL_RenderTargetsActive() ? 0 : tr.offset_y;
 
 		// set 2D virtual screen size
 		switch( tr.rotation )
 		{
 		case REF_ROTATE_CW:
-			pglViewport( 0, 0, gpGlobals->height, gpGlobals->width );
+			pglViewport( x, y, gpGlobals->height, gpGlobals->width );
 			Matrix4x4_CreateOrtho( projection_matrix, 0, gpGlobals->height, gpGlobals->width, 0, -99999, 99999 );
 			Matrix4x4_ConcatRotate( projection_matrix, 90, 0, 0, 1 );
 			Matrix4x4_ConcatTranslate( projection_matrix, 0, -gpGlobals->height, 0 );
 			break;
 		case REF_ROTATE_CCW:
-			pglViewport( 0, 0, gpGlobals->height, gpGlobals->width );
+			pglViewport( x, y, gpGlobals->height, gpGlobals->width );
 			Matrix4x4_CreateOrtho( projection_matrix, 0, gpGlobals->height, gpGlobals->width, 0, -99999, 99999 );
 			Matrix4x4_ConcatRotate( projection_matrix, -90, 0, 0, 1 );
 			Matrix4x4_ConcatTranslate( projection_matrix, -gpGlobals->width, 0, 0 );
 			break;
 		default:
-			pglViewport( 0, 0, gpGlobals->width, gpGlobals->height );
+			pglViewport( x, y, gpGlobals->width, gpGlobals->height );
 			Matrix4x4_CreateOrtho( projection_matrix, 0, gpGlobals->width, gpGlobals->height, 0, -99999, 99999 );
 			break;
 		}
@@ -168,6 +174,8 @@ void R_Set2DMode( qboolean enable )
 		pglDepthMask( GL_FALSE );
 		pglDisable( GL_DEPTH_TEST );
 		pglEnable( GL_ALPHA_TEST );
+		// HUD and console must not be affected by fog
+		pglDisable( GL_FOG );
 		pglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
 
 		if( glConfig.max_multisamples > 1 && gl_msaa.value )
@@ -179,8 +187,13 @@ void R_Set2DMode( qboolean enable )
 	}
 	else
 	{
+		GL_BindSceneTarget();
+
 		pglDepthMask( GL_TRUE );
 		pglEnable( GL_DEPTH_TEST );
+		// restore the scene fog that was disabled in 2D mode
+		if( gl_fog.value && ( RI.fogEnabled || RI.fogCustom ))
+			pglEnable( GL_FOG );
 		glState.in2DMode = false;
 
 		pglMatrixMode( GL_PROJECTION );
