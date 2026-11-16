@@ -337,6 +337,7 @@ typedef struct
 
 #define FONT_FIXED      0
 #define FONT_VARIABLE   1
+#define FONT_TTF        2 // XGLua-CJK: stb_truetype rendered font
 
 #define FONT_DRAW_HUD      BIT( 0 ) // pass to drawing function to apply hud_scale
 #define FONT_DRAW_UTF8     BIT( 1 ) // call UtfProcessChar
@@ -356,6 +357,7 @@ typedef struct
 	int      type;            // fixed width font or variable
 	convar_t *rendermode;     // user-defined default rendermode
 	qboolean	valid;           // all rectangles are valid
+	void     *ttf;            // XGLua-CJK: ttf_font_t when type == FONT_TTF
 } cl_font_t;
 
 typedef struct scissor_state_s
@@ -727,6 +729,7 @@ extern convar_t	cl_trace_stufftext;
 extern convar_t	cl_trace_messages;
 extern convar_t	cl_trace_events;
 extern convar_t	hud_utf8;
+extern convar_t	hud_fontfile; // XGLua-CJK: TrueType font for HUD text
 extern convar_t	cl_showevents;
 extern convar_t	scr_centertime;
 extern convar_t	scr_viewsize;
@@ -848,6 +851,13 @@ qboolean CL_FixedFont( cl_font_t *font );
 qboolean Con_LoadFixedWidthFont( const char *fontname, cl_font_t *font, float scale, convar_t *rendermode, uint texFlags );
 qboolean Con_LoadVariableWidthFont( const char *fontname, cl_font_t *font, float scale, convar_t *rendermode, uint texFlags );
 void CL_FreeFont( cl_font_t *font );
+// XGLua-CJK: TrueType font support, any Unicode codepoint the font has
+qboolean CL_TtfLoadFont( const char *path, cl_font_t *font, float scale, int tall, convar_t *rendermode );
+void CL_TtfFreeFont( cl_font_t *font );
+int  CL_TtfDrawCharacter( float x, float y, int number, const rgba_t color, cl_font_t *font, int flags );
+int  CL_TtfCharAdvance( cl_font_t *font, int ch );
+qboolean CL_TtfAnyLoaded( void );
+qboolean CL_FontIsTtf( cl_font_t *font );
 void CL_SetFontRendermode( cl_font_t *font );
 void CL_SetFontColor( cl_font_t *font, const rgba_t color );
 int CL_DrawCharacter( float x, float y, int number, const rgba_t color, cl_font_t *font, int flags );
@@ -1134,6 +1144,7 @@ void Con_DrawConsole( void );
 void Con_DrawVersion( void );
 int Con_UtfProcessChar( int in );
 int Con_UtfProcessCharForce( int in );
+int Con_ByteToUnicode( int in );
 const char *Con_GetEditText( void );
 int Con_UtfMoveLeft( char *str, int pos );
 int Con_UtfMoveRight( char *str, int pos, int length );

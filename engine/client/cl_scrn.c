@@ -718,8 +718,14 @@ void SCR_LoadCreditsFont( void )
 	float scale = hud_fontscale.value;
 	dword crc = 0;
 
+	// XGLua-CJK: TrueType font takes priority, enables any Unicode codepoint
+	if( hud_fontfile.string[0] )
+	{
+		success = CL_TtfLoadFont( hud_fontfile.string, font, scale, (int)( 20 * Q_max( 1.0f, hud_fontscale.value )), &hud_fontrender );
+	}
+
 	// replace default gfx.wad textures by current charset's font
-	if( !CRC32_File( &crc, "gfx.wad" ) || crc == 0x49eb9f16 )
+	if( !success && ( !CRC32_File( &crc, "gfx.wad" ) || crc == 0x49eb9f16 ))
 	{
 		string charsetFnt;
 

@@ -33,6 +33,7 @@ static CVAR_DEFINE_AUTO( con_fontnum, "-1", FCVAR_ARCHIVE, "console font number 
 static CVAR_DEFINE_AUTO( con_color, "240 180 24", FCVAR_ARCHIVE, "set a custom console color" );
 static CVAR_DEFINE_AUTO( scr_drawversion, "1", FCVAR_ARCHIVE, "draw version in menu or screenshots, doesn't affect console" );
 static CVAR_DEFINE_AUTO( con_oldfont, "0", 0, "use legacy font from gfx.wad, might be missing or broken" );
+CVAR_DEFINE_AUTO( con_fontfile, "gfx/fonts/NotoSansSC-Regular.ttf", FCVAR_ARCHIVE, "XGLua-CJK: TrueType font file (relative to gamedir) for console text, enables Unicode/CJK" );
 static CVAR_DEFINE_AUTO( con_showcompletion, "1", FCVAR_ARCHIVE, "perform simplified autocompletion while typing" );
 
 static int g_codepage = 0;
@@ -562,8 +563,8 @@ static void Con_CheckResize( void )
 {
 	int	charWidth = 8;
 
-	if( con.curFont && con.curFont->hFontTexture )
-		charWidth = con.curFont->charWidths['O'] - 1;
+	if( con.curFont && con.curFont->valid )
+		charWidth = Q_max( 1, con.curFont->charWidths['O'] - 1 );
 
 	wrect_t safe;
 	Con_GetSafeArea( refState.height, &safe );
@@ -665,6 +666,15 @@ static void Con_LoadConsoleFont( int fontNumber, cl_font_t *font )
 	if( font->valid )
 		return; // already loaded
 
+	// XGLua-CJK: TrueType font takes priority, enables any Unicode codepoint
+	if( con_fontfile.string[0] )
+	{
+		int tall = Q_max( 8, refState.width / 80 );
+
+		if( CL_TtfLoadFont( con_fontfile.string, font, scale, tall, &con_fontrender ))
+			return;
+	}
+
 	if( con_oldfont.value )
 	{
 		success = Con_LoadVariableWidthFont( "gfx/conchars.fnt", font, scale, &con_fontrender, TF_FONT|TF_NEAREST );
@@ -742,12 +752,20 @@ int Con_UtfProcessCharForce( int in )
 
 	uint32_t ch = Q_DecodeUTF8( &state, in );
 
+
 	if( g_codepage == 1251 )
 		return Q_UnicodeToCP1251( ch );
 	if( g_codepage == 1252 )
 		return Q_UnicodeToCP1252( ch );
 
 	return '?'; // not implemented yet
+}
+
+int Con_ByteToUnicode( int in )
+{
+	if( g_codepage == 1251 ) return Q_CP1251ToUnicode( (byte)in );
+	if( g_codepage == 1252 ) return Q_CP1252ToUnicode( (byte)in );
+	return (byte)in;
 }
 
 int GAME_EXPORT Con_UtfProcessChar( int in )
@@ -896,6 +914,7 @@ void Con_Init( void )
 	Cvar_RegisterVariable( &con_color );
 	Cvar_RegisterVariable( &scr_drawversion );
 	Cvar_RegisterVariable( &con_oldfont );
+	Cvar_RegisterVariable( &con_fontfile );
 	Cvar_RegisterVariable( &con_showcompletion );
 
 	// init the console buffer
@@ -2628,7 +2647,7 @@ void Con_RunConsole( void )
 			con.vislines = con.showlines;
 	}
 
-	if( FBitSet( con_charset.flags|con_fontscale.flags|con_fontnum.flags|cl_charset.flags|con_oldfont.flags, FCVAR_CHANGED ))
+	if( FBitSet( con_charset.flags|con_fontscale.flags|con_fontnum.flags|cl_charset.flags|con_oldfont.flags|con_fontfile.flags, FCVAR_CHANGED ))
 	{
 		if( con_fontscale.value < 1.0f )
 			Cvar_DirectSet( &con_fontscale, "1" );
@@ -2655,6 +2674,7 @@ void Con_RunConsole( void )
 		ClearBits( con_fontscale.flags, FCVAR_CHANGED );
 		ClearBits( cl_charset.flags,    FCVAR_CHANGED );
 		ClearBits( con_oldfont.flags,   FCVAR_CHANGED );
+		ClearBits( con_fontfile.flags,  FCVAR_CHANGED );
 	}
 }
 

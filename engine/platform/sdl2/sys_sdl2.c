@@ -133,6 +133,9 @@ void SDLash_Init( void )
 		host.type = HOST_DEDICATED;
 	}
 
+#ifdef SDL_HINT_IME_SHOW_UI
+	SDL_SetHint( SDL_HINT_IME_SHOW_UI, "1" ); // XGLua-CJK: show IME candidate window
+#endif
 	SDL_SetHint( SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0" );
 	SDL_SetHint( SDL_HINT_JOYSTICK_HIDAPI_STEAM, "1" );
 	SDL_SetHint( SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1" );

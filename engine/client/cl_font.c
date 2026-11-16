@@ -18,6 +18,7 @@ GNU General Public License for more details.
 #include "client.h"
 #include "qfont.h"
 #include "swaplib.h"
+#include "utflib.h"
 
 le_struct_begin( charinfo_swap )
 	le_struct_field( charinfo, startoffset )
@@ -173,13 +174,16 @@ void CL_FreeFont( cl_font_t *font )
 	if( !font || !font->valid )
 		return;
 
-	ref.dllFuncs.GL_FreeTexture( font->hFontTexture );
+	if( font->type == FONT_TTF )
+		CL_TtfFreeFont( font );
+	else if( font->hFontTexture )
+		ref.dllFuncs.GL_FreeTexture( font->hFontTexture );
 	memset( font, 0, sizeof( *font ));
 }
 
 static int CL_CalcTabStop( const cl_font_t *font, int x )
 {
-	int space = font->charWidths['0'];
+	int space = Q_max( 1, font->charWidths['0'] );
 	int tab   = space * 6; // 6 spaces
 	int stop  = tab - x % tab;
 
@@ -187,6 +191,18 @@ static int CL_CalcTabStop( const cl_font_t *font, int x )
 		return tab * 2 - x % tab; // select next
 
 	return stop;
+}
+
+// TTF consumes UTF-8 directly; legacy fonts continue using the configured codepage.
+static utfstate_t fontUtfState;
+static int CL_DecodeFontChar( cl_font_t *font, int ch )
+{
+	if( font->type == FONT_TTF )
+	{
+		if( !ch ) { memset( &fontUtfState, 0, sizeof( fontUtfState )); return 0; }
+		return cls.accept_utf8 ? Q_DecodeUTF8( &fontUtfState, ch ) : Con_ByteToUnicode( ch );
+	}
+	return Con_UtfProcessChar( ch );
 }
 
 int CL_DrawCharacter( float x, float y, int number, const rgba_t color, cl_font_t *font, int flags )
@@ -205,11 +221,16 @@ int CL_DrawCharacter( float x, float y, int number, const rgba_t color, cl_font_
 	}
 
 	if( FBitSet( flags, FONT_DRAW_UTF8 ))
-		number = Con_UtfProcessChar( number & 255 );
+		number = CL_DecodeFontChar( font, number & 255 );
 	else number &= 255;
 
-	if( !number || !font->charWidths[number])
-		return 0;
+	if( !number ) return 0;
+	if( font->type == FONT_TTF )
+	{
+		if( !FBitSet( flags, FONT_DRAW_NORENDERMODE )) CL_SetFontRendermode( font );
+		return CL_TtfDrawCharacter( x, y, number, color, font, flags );
+	}
+	if( number < 0 || number >= 256 || !font->charWidths[number] ) return 0;
 
 	int texw, texh;
 	R_GetTextureParms( &texw, &texh, font->hFontTexture );
@@ -251,7 +272,7 @@ int CL_DrawString( float x, float y, const char *s, const rgba_t color, cl_font_
 		return 0;
 
 	if( FBitSet( flags, FONT_DRAW_UTF8 ))
-		Con_UtfProcessChar( 0 ); // clear utf state
+		CL_DecodeFontChar( font, 0 ); // clear utf state
 
 	if( !FBitSet( flags, FONT_DRAW_NORENDERMODE ))
 		CL_SetFontRendermode( font );
@@ -319,6 +340,7 @@ void CL_DrawCharacterLen( cl_font_t *font, int number, int *width, int *height )
 	{
 		if( number == '\t' )
 			*width = CL_CalcTabStop( font, 0 ); // at least return max tabstop
+		else if( font->type == FONT_TTF ) *width = CL_TtfCharAdvance( font, number );
 		else *width = font->charWidths[number & 255];
 	}
 	if( height ) *height = font->charHeight;
@@ -341,7 +363,7 @@ void CL_DrawStringLen( cl_font_t *font, const char *s, int *width, int *height, 
 		return;
 
 	if( FBitSet( flags, FONT_DRAW_UTF8 ))
-		Con_UtfProcessChar( 0 ); // reset utf state
+		CL_DecodeFontChar( font, 0 ); // reset utf state
 
 	while( *s )
 	{
@@ -374,10 +396,17 @@ void CL_DrawStringLen( cl_font_t *font, const char *s, int *width, int *height, 
 		}
 
 		if( FBitSet( flags, FONT_DRAW_UTF8 ))
-			number = Con_UtfProcessChar( (byte)*s );
+			number = CL_DecodeFontChar( font, (byte)*s );
 		else number = (byte)*s;
 
-		if( number )
+		// XGLua-CJK: TrueType font metrics are not limited to 256 glyphs
+		if( font->type == FONT_TTF )
+		{
+			if( number )
+				draw_len += CL_TtfCharAdvance( font, number );
+			if( width && draw_len > *width ) *width = draw_len;
+		}
+		else if( number )
 		{
 			draw_len += font->charWidths[number];
 

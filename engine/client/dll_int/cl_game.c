@@ -1946,7 +1946,7 @@ static int GAME_EXPORT pfnDrawCharacter( int x, int y, int number, int r, int g,
 	rgba_t color = { r, g, b, 255 };
 	int flags = FONT_DRAW_HUD;
 
-	if( hud_utf8.value )
+	if( hud_utf8.value || CL_FontIsTtf( &cls.creditsFont ))
 		flags |= FONT_DRAW_UTF8;
 
 	return CL_DrawCharacter( x, y, number, color, &cls.creditsFont, flags );
@@ -3012,7 +3012,7 @@ static int GAME_EXPORT pfnDrawString( int x, int y, const char *str, int r, int 
 	rgba_t color = { r, g, b, 255 };
 	int flags = FONT_DRAW_HUD | FONT_DRAW_NOLF;
 
-	if( hud_utf8.value )
+	if( hud_utf8.value || CL_FontIsTtf( &cls.creditsFont ))
 		SetBits( flags, FONT_DRAW_UTF8 );
 
 	return CL_DrawString( x, y, str, color, &cls.creditsFont, flags );
